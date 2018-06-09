@@ -1,9 +1,10 @@
-#include<iostream>
-#include<fstream>
-#include<cmath>
-#include<cstdio>
-#include<random>
-#include<time.h>
+#include <iostream>
+#include <fstream>
+#include <cmath>
+#include <cstdio>
+#include <random>
+#include <string>
+#include <time.h>
 
 using namespace std;
 
@@ -14,10 +15,10 @@ double Time_wait[100] = { 0 };  //task wait time on edge
 double Time_e[100] = { 0 };  //time task execute on edge
 
 struct Task {
-	int Len; //data length of task
-	int Load;  //workload of task
-	int fc;  //compute frequency of mobile
-	int Limit;  //limit delay time of task
+    int Len; //data length of task
+    int Load;  //workload of task
+    int fc;  //compute frequency of mobile
+    int Limit;  //limit delay time of task
 };
 
 /*double gaussrand()
@@ -49,34 +50,23 @@ struct Task {
 	return X;
 }*/
 
-int proData(int N) {
-	int a, b, c, d;
-	ofstream ostrm("E:\\CppWork\\data.txt", ios::out);
-	for (int i = 0; i < N; i++) {
-		a = rand() % 20 + 1;
-		b = rand() % 10 + 1;
-		c = rand() % 30 + 1;
-		d = rand() % 10 + 1;
-		ostrm << a << " " << b << " " << c << " " << d << '\n' << endl;
+void ProduceData(string& file_name, int produce_num) {
+	ofstream ostrm(file_name, ios::out);
+  for (int i = 0; i < produce_num; ++i) {
+		int a = rand() % 20 + 1;
+		int b = rand() % 10 + 1;
+		int c = rand() % 30 + 1;
+		int d = rand() % 10 + 1;
+    ostrm << a << " " << b << " " << c << " " << d << endl << endl;
 	}
 	ostrm.close();
-	return 0;
 }
 
-double randomExponential()
-{
-	double pV = 0.0;
-	double numda = 0.5;
-	while (true)
-	{
-		pV = (double)rand() / (double)RAND_MAX;
-		if (pV != 1)
-		{
-			break;
-		}
-	}
-	pV = (-1.0 / numda) * log(1 - pV);
-	return pV;
+double GenExpDistribution(double lambda) {
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  exponential_distribution<double> distribution(lambda);
+  return distribution(gen);
 }
 
 int main() {
@@ -84,14 +74,16 @@ int main() {
 	cin >> m >> tran >> fe;
 	double Time = 0;  //current time
 	double proTime = 0;
-	int flag = 0;
+  int reject_cnt = 0;
+  double exp_distribution_lambda = 3;
 
-	proData(m);
-	ifstream istrm("E:\\CppWork\\data.txt", std::ios::in);
+  string file_name = "E:\\CppWork\\data.txt";
+	ProduceData(file_name, m);
+	ifstream istrm(file_name, std::ios::in);
 
 	for (int i = 0; i < m; ++i) {
 		cout << "task" << i + 1 << ":";
-		double delTime = randomExponential();  //interval time between serial tasks
+		double delTime = GenExpDistribution(exp_distribution_lambda);  //interval time between serial tasks
 		//cout << delTime << endl;
 		proTime = delTime + proTime;  //task produce time
 		//cout << "task" << i << " proTime is " << proTime << endl;
@@ -106,39 +98,36 @@ int main() {
 		Time_tran[i] = 1.0 * task_i.Len / tran;
 		//cout << "trans time is " << Time_tran[i] << endl;
 
-		if (proTime + Time_tran[i] > Time) {
-			if ((Time_tran[i] + Time_e[i] >= Time_c[i]) && (Time_c[i] <= task_i.Limit)) {
-				cout << "mobile" << endl;
-				cout << "time is " << Time << endl;
-			}
-			else if (Time_tran[i] + Time_e[i] > task_i.Limit) {
-				cout << "reject" << endl;
-				flag = flag + 1;
-			}
-			else {
-				cout << "edge" << endl;
-				Time = Time_tran[i] + Time_e[i] + proTime;
-				cout << "time is " << Time << endl;
-			}
-		}
-		else {
-			if ((Time - proTime + Time_tran[i] >= Time_c[i]) && (Time_c[i] <= task_i.Limit)) {
-				cout << "mobile" << endl;
-				cout << "time is " << Time << endl;
-			}
-			else if (Time - proTime + Time_tran[i] > task_i.Limit) {
-				cout << "reject" << endl;
-				flag = flag + 1;
-			}
-			else {
-				cout << "edge" << endl;
-				Time = Time + Time_e[i];
-				cout << "time is " << Time << endl;
-			}
+		if (proTime + Time_tran[i] >= Time) {
+      double local_cost = Time_c[i];
+      double edge_cost = Time_e[i] + Time_tran[i];
+      if (task_i.Limit < local_cost && task_i.Limit < edge_cost) {
+        cout << "reject" << endl;
+        ++reject_cnt;
+      } else if (local_cost < edge_cost) {
+        cout << "mobile" << endl << "time is " << Time << endl;
+      } else {
+        Time = Time_tran[i] + Time_e[i] + proTime;
+        cout << "edge" << endl << "time is " << Time << endl;
+      }
+		} else {
+      double wait_time = Time - (proTime + Time_tran[i]);
+      double local_cost = Time_c[i];
+      double edge_cost = Time_e[i] + Time_tran[i] + wait_time;
+
+      if (task_i.Limit < local_cost && task_i.Limit < edge_cost) {
+        cout << "reject" << endl;
+        ++reject_cnt;
+      } else if (local_cost < edge_cost) {
+        cout << "mobile" << endl << "time is " << Time << endl;
+      } else {
+        Time = Time + Time_e[i];
+        cout << "edge" << endl << "time is " << Time << endl;
+      }
 		}
 		cout << endl;
 	}
 	istrm.close();
-	cout << "reject: " << flag << endl;
+	cout << "reject: " << reject_cnt << endl;
 	return 0;
 }
