@@ -60,7 +60,7 @@ void SolveByOneStepStrategy(const std::vector<TaskDesc>& job_conf) {
   int reject_cnt = 0;
   for (int i = 0; i < job_conf.size(); ++i) {
     const TaskDesc& task_desc = job_conf[i];
-		if (task_desc.gen_time + task_desc.time_transmit >= edge_time) {
+    if (task_desc.gen_time + task_desc.time_transmit >= edge_time) {
       double local_cost = task_desc.time_mobile;
       double edge_cost = task_desc.time_edge + task_desc.time_transmit;
       if (task_desc.limit < local_cost && task_desc.limit < edge_cost) {
@@ -72,23 +72,22 @@ void SolveByOneStepStrategy(const std::vector<TaskDesc>& job_conf) {
         edge_time = task_desc.time_transmit + task_desc.time_edge + task_desc.gen_time;
         std::cout << "edge" << std::endl << "time is " << edge_time << std::endl;
       }
-		} else {
+    } else {
       double wait_time = edge_time - (task_desc.gen_time + task_desc.time_transmit);
       double local_cost = task_desc.time_mobile;
       double edge_cost = task_desc.time_edge  + task_desc.time_transmit + wait_time;
-
       if (task_desc.limit < local_cost && task_desc.limit < edge_cost) {
-        std::cout << "reject" << std::endl;
-        ++reject_cnt;
+       std::cout << "reject" << std::endl;
+       ++reject_cnt;
       } else if (local_cost < edge_cost) {
         std::cout << "mobile" << std::endl << "time is " << edge_time << std::endl;
       } else {
         edge_time = edge_time + task_desc.time_edge;
         std::cout << "edge" << std::endl << "time is " << edge_time << std::endl;
       }
-		}
+    }
     std::cout << std::endl;
-	}
+  }
   std::cout << "reject: " << reject_cnt << std::endl;
 }
 
@@ -98,7 +97,7 @@ int main() {
   double edge_comp_frequency;
   std::cin >> task_num >> transmit_speed >> edge_comp_frequency;
 
-  std::string file_name = "E:\\CppWork\\data.txt";
+  std::string file_name = "/home/zhuyi/job_conf";
   std::vector<TaskDesc> job_conf;
   GenJonConf(task_num, edge_comp_frequency, transmit_speed, job_conf);
   WriteJobConf2File(file_name, job_conf);
