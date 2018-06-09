@@ -52,7 +52,7 @@ void WriteJobConf2File(const std::string& file_name, const std::vector<TaskDesc>
       << " " << task_desc.time_mobile << " " << task_desc.time_edge << " "
       << task_desc.time_transmit << " " << task_desc.gen_time << std::endl << std::endl;
   }
-	ostrm.close();
+  ostrm.close();
 }
 
 void SolveByOneStepStrategy(const std::vector<TaskDesc>& job_conf) {
@@ -102,5 +102,5 @@ int main() {
   GenJonConf(task_num, edge_comp_frequency, transmit_speed, job_conf);
   WriteJobConf2File(file_name, job_conf);
   SolveByOneStepStrategy(job_conf);
-	return 0;
+  return 0;
 }
