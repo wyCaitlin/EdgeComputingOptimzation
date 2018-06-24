@@ -4,130 +4,157 @@
 #include <cstdio>
 #include <random>
 #include <string>
+#include <queue>
 #include <time.h>
 
-using namespace std;
+const double exp_dist_para = 3.0;
 
-double Time_c[100] = { 0 };  //time task execute on mobile
-double Energy_c[100] = { 0 };  //energy task execute on mobile
-double Time_tran[100] = { 0 }; //task transmit time
-double Time_wait[100] = { 0 };  //task wait time on edge
-double Time_e[100] = { 0 };  //time task execute on edge
+struct TaskDesc {
+  int len; // data length of task
+  int load;  // workload of task
+  int fc;  // compute frequency of mobile
+  int limit;  // limit delay time of task
 
-struct Task {
-    int Len; //data length of task
-    int Load;  //workload of task
-    int fc;  //compute frequency of mobile
-    int Limit;  //limit delay time of task
+  double time_mobile;
+  double time_transmit;
+  double time_wait;
+  double time_edge;
+
+  double gen_time;
 };
 
-/*double gaussrand()
-{
-	static double V1, V2, S;
-	static int phase = 0;
-	double X;
+bool GenOneTask(TaskDesc* task_desc, double edge_comp_frequency, double transmit_speed) {
+  task_desc->len = rand() % 20 + 1;
+  task_desc->load = rand() % 10 + 1;
+  task_desc->fc = rand() % 30 + 1;
+  // we set limit to inf to avoid reject situation
+  task_desc->limit = std::numeric_limits<int>::max();
+  // task_desc->limit = rand() % 10 + 1;
 
-	if (phase == 0) {
-		do {
-			double U1 = (double)rand() / RAND_MAX;
-			double U2 = (double)rand() / RAND_MAX;
+  task_desc->time_mobile = 1.0 * task_desc->len * task_desc->load / task_desc->fc;
+  task_desc->time_edge = 1.0 * task_desc->len * task_desc->load / edge_comp_frequency;
+  task_desc->time_transmit = 1.0 * task_desc->len / transmit_speed;
 
-			V1 = 2 * U1 - 1;
-			V2 = 2 * U2 - 1;
-			S = V1 * V1 + V2 * V2;
-		} while (S >= 1 || S == 0);
-
-		X = V1 * sqrt(-2 * log(S) / S);
-	}
-	else
-		X = V2 * sqrt(-2 * log(S) / S);
-
-	phase = 1 - phase;
-	X = X + 4;
-	if (X < 0) {
-		X = 0.0 - X;
-	}
-	return X;
-}*/
-
-void ProduceData(string& file_name, int produce_num) {
-	ofstream ostrm(file_name, ios::out);
-  for (int i = 0; i < produce_num; ++i) {
-		int a = rand() % 20 + 1;
-		int b = rand() % 10 + 1;
-		int c = rand() % 30 + 1;
-		int d = rand() % 10 + 1;
-    ostrm << a << " " << b << " " << c << " " << d << endl << endl;
-	}
-	ostrm.close();
+  if (task_desc->time_mobile > task_desc->limit &&
+      (task_desc->time_edge + task_desc->time_transmit) > task_desc->limit) {
+    // illegal task desc
+    return false;
+  } else {
+    return true;
+  }
 }
 
-double GenExpDistribution(double lambda) {
+void GenJonConf(int task_num, double edge_comp_frequency, double transmit_speed,
+    std::vector<TaskDesc>& job_conf) {
+  job_conf.resize(task_num);
+  double cur_time = 0.0;
   std::random_device rd;
   std::mt19937 gen(rd());
-  exponential_distribution<double> distribution(lambda);
-  return distribution(gen);
+  std::exponential_distribution<double> distribution(exp_dist_para);
+  for (int i = 0; i < task_num; ++i) {
+    while (!GenOneTask(&job_conf[i], edge_comp_frequency, transmit_speed)) {}
+    job_conf[i].gen_time = cur_time;
+    cur_time += distribution(gen);
+  }
+}
+
+void WriteJobConf2File(const std::string& file_name, const std::vector<TaskDesc>& job_conf) {
+  std::fstream ostrm(file_name, std::ios::out);
+  for (const auto& task_desc : job_conf) {
+    ostrm << task_desc.len << " " << task_desc.load << " " << task_desc.fc << " " << task_desc.limit
+      << " " << task_desc.time_mobile << " " << task_desc.time_edge << " "
+      << task_desc.time_transmit << " " << task_desc.gen_time << std::endl << std::endl;
+  }
+  ostrm.close();
+}
+
+void SolveByOneStepStrategy(const std::vector<TaskDesc>& job_conf) {
+  double edge_time = 0;
+  int reject_cnt = 0;
+  double cost = 0;
+  for (int i = 0; i < job_conf.size(); ++i) {
+    const TaskDesc& task_desc = job_conf[i];
+    if (task_desc.gen_time + task_desc.time_transmit >= edge_time) {
+      double local_cost = task_desc.time_mobile;
+      double edge_cost = task_desc.time_edge + task_desc.time_transmit;
+      if (task_desc.limit < local_cost && task_desc.limit < edge_cost) {
+        // in fact, this situation will not happen
+        std::cout << "reject" << std::endl;
+        ++reject_cnt;
+      } else if (local_cost < edge_cost) {
+        // std::cout << "mobile" << std::endl << "time is " << edge_time << std::endl;
+        cost += local_cost;
+      } else {
+        edge_time = task_desc.time_transmit + task_desc.time_edge + task_desc.gen_time;
+        // std::cout << "edge" << std::endl << "time is " << edge_time << std::endl;
+        cost += edge_cost;
+      }
+    } else {
+      double wait_time = edge_time - (task_desc.gen_time + task_desc.time_transmit);
+      double local_cost = task_desc.time_mobile;
+      double edge_cost = task_desc.time_edge  + task_desc.time_transmit + wait_time;
+      if (task_desc.limit < local_cost && task_desc.limit < edge_cost) {
+        // this situation may happen
+        std::cout << "reject" << std::endl;
+        ++reject_cnt;
+      } else if (local_cost < edge_cost) {
+        // std::cout << "mobile" << std::endl << "time is " << edge_time << std::endl;
+        cost += local_cost;
+      } else {
+        edge_time = edge_time + task_desc.time_edge;
+        // std::cout << "edge" << std::endl << "time is " << edge_time << std::endl;
+        cost += edge_cost;
+      }
+    }
+  }
+  // std::cout << "reject: " << reject_cnt << std::endl;
+  std::cout << "Cost calculated by One Step Strategy is " << cost << std::endl;
+}
+
+void SolveByBruteForce(const std::vector<TaskDesc>& job_conf) {
+  int task_cnt = static_cast<int>(job_conf.size());
+  if (task_cnt > 30) {
+    std::cout << "Brute force only for problem size <= 30" << std::endl;
+    return;
+  }
+  // reject situation is not considered in current brute force implementation
+  double min_cost = std::numeric_limits<double>::max();
+  for (int i = 0; i < (1 << task_cnt); ++i) {
+    std::queue<TaskDesc> edge_queue;
+    double cur_cost = 0;
+    int cur_reject_cnt = 0;
+    for (int j = 0; j < task_cnt; ++j) {
+      if (i & (1 << j)) {
+        edge_queue.push(job_conf[j]);
+      } else {
+        cur_cost += job_conf[j].time_mobile;
+      }
+    }
+    double edge_time = 0;
+    while (!edge_queue.empty()) {
+      TaskDesc task = edge_queue.front();
+      edge_queue.pop();
+      double wait_time = std::max(edge_time - (task.gen_time + task.time_transmit), 0.0);
+      cur_cost += wait_time + task.time_edge;
+      edge_time = task.gen_time + task.time_transmit + wait_time + task.time_edge;
+    }
+    min_cost = std::min(cur_cost, min_cost);
+  }
+  std::cout << "Ground truth cost is " << min_cost << std::endl;
 }
 
 int main() {
-	int m, tran, fe;  //task amount, transmit speed, compute frequency of edge
-	cin >> m >> tran >> fe;
-	double Time = 0;  //current time
-	double proTime = 0;
-  int reject_cnt = 0;
-  double exp_distribution_lambda = 3;
+  int task_num;
+  double transmit_speed;
+  double edge_comp_frequency;
+  std::cin >> task_num >> transmit_speed >> edge_comp_frequency;
 
-  string file_name = "E:\\CppWork\\data.txt";
-	ProduceData(file_name, m);
-	ifstream istrm(file_name, std::ios::in);
-
-	for (int i = 0; i < m; ++i) {
-		cout << "task" << i + 1 << ":";
-		double delTime = GenExpDistribution(exp_distribution_lambda);  //interval time between serial tasks
-		//cout << delTime << endl;
-		proTime = delTime + proTime;  //task produce time
-		//cout << "task" << i << " proTime is " << proTime << endl;
-		Task task_i;
-		istrm >> task_i.Len >> task_i.Load >> task_i.fc >> task_i.Limit;
-
-		Time_c[i] = 1.0 * task_i.Len * task_i.Load / task_i.fc;
-		//cout << "compute on mobile comsume " << Time_c[i] << endl;
-		Time_e[i] = 1.0 * task_i.Len * task_i.Load / fe;
-		//cout << "compute on edge comsume " << Time_e[i] << endl;
-		//Energy_c[i] = task_i.Len * task_i.Load * task_i.fc * task_i.fc;
-		Time_tran[i] = 1.0 * task_i.Len / tran;
-		//cout << "trans time is " << Time_tran[i] << endl;
-
-		if (proTime + Time_tran[i] >= Time) {
-      double local_cost = Time_c[i];
-      double edge_cost = Time_e[i] + Time_tran[i];
-      if (task_i.Limit < local_cost && task_i.Limit < edge_cost) {
-        cout << "reject" << endl;
-        ++reject_cnt;
-      } else if (local_cost < edge_cost) {
-        cout << "mobile" << endl << "time is " << Time << endl;
-      } else {
-        Time = Time_tran[i] + Time_e[i] + proTime;
-        cout << "edge" << endl << "time is " << Time << endl;
-      }
-		} else {
-      double wait_time = Time - (proTime + Time_tran[i]);
-      double local_cost = Time_c[i];
-      double edge_cost = Time_e[i] + Time_tran[i] + wait_time;
-
-      if (task_i.Limit < local_cost && task_i.Limit < edge_cost) {
-        cout << "reject" << endl;
-        ++reject_cnt;
-      } else if (local_cost < edge_cost) {
-        cout << "mobile" << endl << "time is " << Time << endl;
-      } else {
-        Time = Time + Time_e[i];
-        cout << "edge" << endl << "time is " << Time << endl;
-      }
-		}
-		cout << endl;
-	}
-	istrm.close();
-	cout << "reject: " << reject_cnt << endl;
-	return 0;
+  // update file_name when your execute this program
+  std::string file_name = "/home/zhuyi/job_conf";
+  std::vector<TaskDesc> job_conf;
+  GenJonConf(task_num, edge_comp_frequency, transmit_speed, job_conf);
+  WriteJobConf2File(file_name, job_conf);
+  SolveByOneStepStrategy(job_conf);
+  SolveByBruteForce(job_conf);
+  return 0;
 }
