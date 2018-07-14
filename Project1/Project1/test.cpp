@@ -5,7 +5,8 @@
 #include <random>
 #include <string>
 #include <queue>
-#include <time.h>
+#include <cstdlib>
+#include <ctime>
 
 const double exp_dist_para = 3.0;
 
@@ -24,9 +25,10 @@ struct TaskDesc {
 };
 
 bool GenOneTask(TaskDesc* task_desc, double edge_comp_frequency, double transmit_speed) {
-  task_desc->len = rand() % 20 + 1;
-  task_desc->load = rand() % 10 + 1;
-  task_desc->fc = rand() % 30 + 1;
+  std::srand(std::time(nullptr));
+  task_desc->len = std::rand() % 20 + 1;
+  task_desc->load = std::rand() % 10 + 1;
+  task_desc->fc = std::rand() % 30 + 1;
   // we set limit to inf to avoid reject situation
   task_desc->limit = std::numeric_limits<int>::max();
   // task_desc->limit = rand() % 10 + 1;
@@ -111,6 +113,71 @@ void SolveByOneStepStrategy(const std::vector<TaskDesc>& job_conf) {
   std::cout << "Cost calculated by One Step Strategy is " << cost << std::endl;
 }
 
+double CalcExpectedTimeOnEdge(double prev_gen_time, double time_transmit, double time_edge,
+    double prev_end_time, double lambda) {
+  if (prev_gen_time + time_transmit >= prev_end_time) {
+    return time_transmit + time_edge;
+  }
+  double threshold = prev_end_time - prev_gen_time - time_transmit;
+  // case1 : wait
+  double expected_cost1 = (prev_end_time + time_edge - prev_gen_time) * (1 - std::exp(- lambda * threshold))
+    + (std::exp(- lambda * threshold) * (lambda * threshold + 1) - 1) / lambda; 
+  // case2 : no wait
+  double expected_cost2 = (time_transmit + time_edge) * std::exp(- lambda * threshold);
+  return expected_cost1 + expected_cost2;
+}
+
+void SolveByTwoStepStrategy(const std::vector<TaskDesc>& job_conf) {
+  double lambda_1 = 1;
+  double lambda_2 = 10;
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<> dis(lambda_1, lambda_2);
+  double lambda = dis(gen);
+  double cur_time = 0.0;
+  double sum_delta_time = 0.0;
+  double prev_end_time = 0.0;
+  double total_cost = 0.0;
+  for (int i = 0; i < job_conf.size(); ++i) {
+    const TaskDesc& task_desc = job_conf[i];
+    sum_delta_time += task_desc.gen_time - cur_time;
+    cur_time = task_desc.gen_time;
+    // update lambda by MAP
+    double opt_lambda = 1.0 * (i + 1) / sum_delta_time;
+    if (opt_lambda < lambda_1) {
+      lambda = lambda_1;
+    } else if (opt_lambda > lambda_2) {
+      lambda = lambda_2;
+    } else {
+      lambda = opt_lambda;
+    }
+    // assume next work share same properties
+    // minimize the expected cost of current and next work
+    // mobile + mobile
+    double t0 = task_desc.time_mobile + task_desc.time_mobile;
+    // mobile + edge
+    double t1 = task_desc.time_mobile + CalcExpectedTimeOnEdge(task_desc.gen_time,
+        task_desc.time_transmit, task_desc.time_edge, prev_end_time, lambda);
+    double try_edge_start_time = std::max(prev_end_time, task_desc.gen_time +
+        task_desc.time_transmit);
+    double try_edge_cost = try_edge_start_time + task_desc.time_edge - task_desc.gen_time;
+    // edge + mobile
+    double t2 = try_edge_cost + task_desc.time_mobile;
+    // edge + edge
+    double t3 = try_edge_cost + CalcExpectedTimeOnEdge(task_desc.gen_time,
+        task_desc.time_transmit, task_desc.time_edge, try_edge_start_time + task_desc.time_edge,
+        lambda);
+    if (std::min(t0, t1) < std::min(t2, t3)) {
+      total_cost += task_desc.time_mobile;
+    } else {
+      total_cost += try_edge_cost;
+      prev_end_time = try_edge_start_time + task_desc.time_edge;
+    }
+  }
+  std::cout << "Estimated lambda : " << lambda << std::endl;
+  std::cout << "Cost calculated by Two Step Strategy is " << total_cost << std::endl;
+}
+
 void SolveByBruteForce(const std::vector<TaskDesc>& job_conf) {
   int task_cnt = static_cast<int>(job_conf.size());
   if (task_cnt > 30) {
@@ -154,6 +221,7 @@ int main() {
   std::vector<TaskDesc> job_conf;
   GenJonConf(task_num, edge_comp_frequency, transmit_speed, job_conf);
   WriteJobConf2File(file_name, job_conf);
+  SolveByTwoStepStrategy(job_conf);
   SolveByOneStepStrategy(job_conf);
   SolveByBruteForce(job_conf);
   return 0;
