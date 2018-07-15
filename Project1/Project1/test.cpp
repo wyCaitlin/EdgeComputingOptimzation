@@ -7,6 +7,7 @@
 #include <queue>
 #include <cstdlib>
 #include <ctime>
+#include <sstream>
 
 const double exp_dist_para = 3.0;
 
@@ -25,7 +26,6 @@ struct TaskDesc {
 };
 
 bool GenOneTask(TaskDesc* task_desc, double edge_comp_frequency, double transmit_speed) {
-  std::srand(std::time(nullptr));
   task_desc->len = std::rand() % 20 + 1;
   task_desc->load = std::rand() % 10 + 1;
   task_desc->fc = std::rand() % 30 + 1;
@@ -53,6 +53,7 @@ void GenJonConf(int task_num, double edge_comp_frequency, double transmit_speed,
   std::random_device rd;
   std::mt19937 gen(rd());
   std::exponential_distribution<double> distribution(exp_dist_para);
+  std::srand(std::time(nullptr));
   for (int i = 0; i < task_num; ++i) {
     while (!GenOneTask(&job_conf[i], edge_comp_frequency, transmit_speed)) {}
     job_conf[i].gen_time = cur_time;
@@ -60,12 +61,26 @@ void GenJonConf(int task_num, double edge_comp_frequency, double transmit_speed,
   }
 }
 
+void ReadJobConf4File(const std::string& file_name, std::vector<TaskDesc>& job_conf) {
+  job_conf.clear();
+  std::ifstream istrm(file_name);
+  std::string line;
+  while (std::getline(istrm, line)) {
+    std::istringstream iss(line);
+    TaskDesc task_desc;
+    iss >> task_desc.len >> task_desc.load >> task_desc.fc >> task_desc.limit >>
+      task_desc.time_mobile >> task_desc.time_edge >> task_desc.time_transmit >> task_desc.gen_time;
+    job_conf.push_back(task_desc);
+  }
+  istrm.close();
+}
+
 void WriteJobConf2File(const std::string& file_name, const std::vector<TaskDesc>& job_conf) {
   std::fstream ostrm(file_name, std::ios::out);
   for (const auto& task_desc : job_conf) {
     ostrm << task_desc.len << " " << task_desc.load << " " << task_desc.fc << " " << task_desc.limit
       << " " << task_desc.time_mobile << " " << task_desc.time_edge << " "
-      << task_desc.time_transmit << " " << task_desc.gen_time << std::endl << std::endl;
+      << task_desc.time_transmit << " " << task_desc.gen_time << std::endl;
   }
   ostrm.close();
 }
@@ -210,19 +225,42 @@ void SolveByBruteForce(const std::vector<TaskDesc>& job_conf) {
   std::cout << "Ground truth cost is " << min_cost << std::endl;
 }
 
-int main() {
-  int task_num;
-  double transmit_speed;
-  double edge_comp_frequency;
-  std::cin >> task_num >> transmit_speed >> edge_comp_frequency;
+void PrintUsage() {
+  std::cout << "Usage of this program: " << std::endl
+    << "-g task_num transmit_speed edge_comp_frequency output_filename: "
+    << "generate taskconf and store in file" << std::endl
+    << "-o input_filename: "
+    << "solve taskconf stored in input_filename by one step strategy" << std::endl
+    << "-t input_filename: "
+    << "solve taskconf stored in input_filename by two step strategy" << std::endl
+    << "-b input_filename: "
+    << "solve taskconf stored in input_filename by brute force" << std::endl;
+}
 
-  // update file_name when your execute this program
-  std::string file_name = "/home/zhuyi/job_conf";
-  std::vector<TaskDesc> job_conf;
-  GenJonConf(task_num, edge_comp_frequency, transmit_speed, job_conf);
-  WriteJobConf2File(file_name, job_conf);
-  SolveByTwoStepStrategy(job_conf);
-  SolveByOneStepStrategy(job_conf);
-  SolveByBruteForce(job_conf);
+int main(int argc, char* argv[]) {
+  if (argc == 6 && std::string(argv[1]) == "-g") {
+    int task_num = std::stoi(std::string(argv[2]));
+    double transmit_speed = std::stod(std::string(argv[3]));
+    double edge_comp_frequency = std::stod(std::string(argv[4]));
+    std::string output_filename = std::string(argv[5]);
+    std::vector<TaskDesc> job_conf;
+    GenJonConf(task_num, edge_comp_frequency, transmit_speed, job_conf);
+    WriteJobConf2File(output_filename, job_conf);
+  } else if (argc == 3) {
+    std::string input_filename = std::string(argv[2]);
+    std::vector<TaskDesc> job_conf;
+    ReadJobConf4File(input_filename, job_conf);
+    if (std::string(argv[1]) == "-o") {
+      SolveByOneStepStrategy(job_conf);
+    } else if (std::string(argv[1]) == "-t") {
+      SolveByTwoStepStrategy(job_conf);
+    } else if (std::string(argv[1]) == "-b") {
+      SolveByBruteForce(job_conf);
+    } else {
+      PrintUsage();
+    }
+  } else {
+    PrintUsage();
+  }
   return 0;
 }
