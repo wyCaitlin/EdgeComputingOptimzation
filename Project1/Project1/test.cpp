@@ -225,6 +225,30 @@ void SolveByBruteForce(const std::vector<TaskDesc>& job_conf) {
   std::cout << "Ground truth cost is " << min_cost << std::endl;
 }
 
+void SolveByRandom(const std::vector<TaskDesc>& job_conf) {
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<> dis(0.0, 1.0);
+  double total_cost = 0;
+  std::queue<TaskDesc> edge_queue;
+  for (int i = 0; i < job_conf.size(); ++i) {
+    if (dis(gen) < 0.5) {
+      edge_queue.push(job_conf[i]);
+    } else {
+      total_cost += job_conf[i].time_mobile;
+    }
+  }
+  double edge_time = 0;
+  while (!edge_queue.empty()) {
+    TaskDesc task = edge_queue.front();
+    edge_queue.pop();
+    double wait_time = std::max(edge_time - (task.gen_time + task.time_transmit), 0.0);
+    total_cost+= wait_time + task.time_edge;
+    edge_time = task.gen_time + task.time_transmit + wait_time + task.time_edge;
+  }
+  std::cout << "Cost calculated by Random Strategy is " << total_cost << std::endl;
+}
+
 void PrintUsage() {
   std::cout << "Usage of this program: " << std::endl
     << "-g task_num transmit_speed edge_comp_frequency output_filename: "
@@ -234,7 +258,9 @@ void PrintUsage() {
     << "-t input_filename: "
     << "solve taskconf stored in input_filename by two step strategy" << std::endl
     << "-b input_filename: "
-    << "solve taskconf stored in input_filename by brute force" << std::endl;
+    << "solve taskconf stored in input_filename by brute force" << std::endl
+    << "-r input_filename: "
+    << "solve taskconf stored in input_filename by random" << std::endl;
 }
 
 int main(int argc, char* argv[]) {
@@ -256,6 +282,8 @@ int main(int argc, char* argv[]) {
       SolveByTwoStepStrategy(job_conf);
     } else if (std::string(argv[1]) == "-b") {
       SolveByBruteForce(job_conf);
+    } else if (std::string(argv[1]) == "-r") {
+      SolveByRandom(job_conf);
     } else {
       PrintUsage();
     }
