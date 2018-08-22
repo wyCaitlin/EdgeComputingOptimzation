@@ -10,12 +10,14 @@
 #include <sstream>
 
 const double exp_dist_para = 3.0;
+const double force2server_ratio = 0.2;
 
 struct TaskDesc {
   int len; // data length of task
   int load;  // workload of task
   int fc;  // compute frequency of mobile
   int limit;  // limit delay time of task
+  bool force2server;  // if true, forced to be excuted on server
 
   double time_mobile;
   double time_transmit;
@@ -32,6 +34,7 @@ bool GenOneTask(TaskDesc* task_desc, double edge_comp_frequency, double transmit
   // we set limit to inf to avoid reject situation
   task_desc->limit = std::numeric_limits<int>::max();
   // task_desc->limit = rand() % 10 + 1;
+  task_desc->force2server = false;
 
   task_desc->time_mobile = 1.0 * task_desc->len * task_desc->load / task_desc->fc;
   task_desc->time_edge = 1.0 * task_desc->len * task_desc->load / edge_comp_frequency;
@@ -53,10 +56,14 @@ void GenJonConf(int task_num, double edge_comp_frequency, double transmit_speed,
   std::random_device rd;
   std::mt19937 gen(rd());
   std::exponential_distribution<double> distribution(exp_dist_para);
+  std::uniform_real_distribution<> uniform_dist(0.0, 1.0);
   std::srand(std::time(nullptr));
   for (int i = 0; i < task_num; ++i) {
     while (!GenOneTask(&job_conf[i], edge_comp_frequency, transmit_speed)) {}
     job_conf[i].gen_time = cur_time;
+    if (uniform_dist(gen) < force2server_ratio) {
+      job_conf[i].force2server = true;
+    }
     cur_time += distribution(gen);
   }
 }
@@ -68,7 +75,7 @@ void ReadJobConf4File(const std::string& file_name, std::vector<TaskDesc>& job_c
   while (std::getline(istrm, line)) {
     std::istringstream iss(line);
     TaskDesc task_desc;
-    iss >> task_desc.len >> task_desc.load >> task_desc.fc >> task_desc.limit >>
+    iss >> task_desc.len >> task_desc.load >> task_desc.fc >> task_desc.limit >> task_desc.force2server >>
       task_desc.time_mobile >> task_desc.time_edge >> task_desc.time_transmit >> task_desc.gen_time;
     job_conf.push_back(task_desc);
   }
@@ -79,8 +86,8 @@ void WriteJobConf2File(const std::string& file_name, const std::vector<TaskDesc>
   std::fstream ostrm(file_name, std::ios::out);
   for (const auto& task_desc : job_conf) {
     ostrm << task_desc.len << " " << task_desc.load << " " << task_desc.fc << " " << task_desc.limit
-      << " " << task_desc.time_mobile << " " << task_desc.time_edge << " "
-      << task_desc.time_transmit << " " << task_desc.gen_time << std::endl;
+      << " " << task_desc.force2server << " " << task_desc.time_mobile << " " << task_desc.time_edge
+      << " " << task_desc.time_transmit << " " << task_desc.gen_time << std::endl;
   }
   ostrm.close();
 }
@@ -91,6 +98,11 @@ void SolveByOneStepStrategy(const std::vector<TaskDesc>& job_conf) {
   double cost = 0;
   for (int i = 0; i < job_conf.size(); ++i) {
     const TaskDesc& task_desc = job_conf[i];
+    if (task_desc.force2server) {
+      edge_time = std::max(edge_time, task_desc.gen_time + task_desc.time_transmit) + task_desc.time_edge;
+      cost += edge_time - task_desc.gen_time;
+      continue;
+    }
     if (task_desc.gen_time + task_desc.time_transmit >= edge_time) {
       double local_cost = task_desc.time_mobile;
       double edge_cost = task_desc.time_edge + task_desc.time_transmit;
@@ -182,7 +194,7 @@ void SolveByTwoStepStrategy(const std::vector<TaskDesc>& job_conf) {
     double t3 = try_edge_cost + CalcExpectedTimeOnEdge(task_desc.gen_time,
         task_desc.time_transmit, task_desc.time_edge, try_edge_start_time + task_desc.time_edge,
         lambda);
-    if (std::min(t0, t1) < std::min(t2, t3)) {
+    if (std::min(t0, t1) < std::min(t2, t3) && task_desc.force2server == false) {
       total_cost += task_desc.time_mobile;
     } else {
       total_cost += try_edge_cost;
@@ -193,34 +205,52 @@ void SolveByTwoStepStrategy(const std::vector<TaskDesc>& job_conf) {
   std::cout << "Cost calculated by Two Step Strategy is " << total_cost << std::endl;
 }
 
+// true -> on server
+// false -> on mobile
+double EvalStrategy(const std::vector<TaskDesc>& job_conf, const std::vector<bool>& strategy) {
+  std::queue<TaskDesc> edge_queue;
+  double cur_cost = 0;
+  for (int i = 0; i < job_conf.size(); ++i) {
+    if (strategy[i]) {
+      edge_queue.push(job_conf[i]);
+    } else {
+      cur_cost += job_conf[i].time_mobile;
+    }
+  }
+  double edge_time = 0;
+  while (!edge_queue.empty()) {
+    TaskDesc task = edge_queue.front();
+    edge_queue.pop();
+    double wait_time = std::max(edge_time - (task.gen_time + task.time_transmit), 0.0);
+    cur_cost += wait_time + task.time_edge;
+    edge_time = task.gen_time + task.time_transmit + wait_time + task.time_edge;
+  }
+  return cur_cost;
+}
+
 void SolveByBruteForce(const std::vector<TaskDesc>& job_conf) {
   int task_cnt = static_cast<int>(job_conf.size());
   if (task_cnt > 30) {
     std::cout << "Brute force only for problem size <= 30" << std::endl;
     return;
   }
-  // reject situation is not considered in current brute force implementation
   double min_cost = std::numeric_limits<double>::max();
-  for (int i = 0; i < (1 << task_cnt); ++i) {
-    std::queue<TaskDesc> edge_queue;
-    double cur_cost = 0;
-    int cur_reject_cnt = 0;
+  int not_arranged_cnt = 0;
+  for (int i = 0; i < task_cnt; ++i) {
+    if (!job_conf[i].force2server)  { ++not_arranged_cnt; }
+  }
+  for (int i = 0; i < (1 << not_arranged_cnt); ++i) {
+    int iter = 0;
+    std::vector<bool> strategy(task_cnt, false);
     for (int j = 0; j < task_cnt; ++j) {
-      if (i & (1 << j)) {
-        edge_queue.push(job_conf[j]);
+      if (job_conf[j].force2server) {
+        strategy[j] = true;
       } else {
-        cur_cost += job_conf[j].time_mobile;
+        if (i & (1 << iter)) { strategy[j] = true; }
+        ++iter;
       }
     }
-    double edge_time = 0;
-    while (!edge_queue.empty()) {
-      TaskDesc task = edge_queue.front();
-      edge_queue.pop();
-      double wait_time = std::max(edge_time - (task.gen_time + task.time_transmit), 0.0);
-      cur_cost += wait_time + task.time_edge;
-      edge_time = task.gen_time + task.time_transmit + wait_time + task.time_edge;
-    }
-    min_cost = std::min(cur_cost, min_cost);
+    min_cost = std::min(min_cost, EvalStrategy(job_conf, strategy));
   }
   std::cout << "Ground truth cost is " << min_cost << std::endl;
 }
@@ -229,23 +259,15 @@ void SolveByRandom(const std::vector<TaskDesc>& job_conf) {
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_real_distribution<> dis(0.0, 1.0);
-  double total_cost = 0;
-  std::queue<TaskDesc> edge_queue;
+  std::vector<bool> strategy(job_conf.size(), false);
   for (int i = 0; i < job_conf.size(); ++i) {
-    if (dis(gen) < 0.5) {
-      edge_queue.push(job_conf[i]);
+    if (dis(gen) < 0.5 || job_conf[i].force2server) {
+      strategy[i] = true;
     } else {
-      total_cost += job_conf[i].time_mobile;
+      strategy[i] = false;
     }
   }
-  double edge_time = 0;
-  while (!edge_queue.empty()) {
-    TaskDesc task = edge_queue.front();
-    edge_queue.pop();
-    double wait_time = std::max(edge_time - (task.gen_time + task.time_transmit), 0.0);
-    total_cost+= wait_time + task.time_edge;
-    edge_time = task.gen_time + task.time_transmit + wait_time + task.time_edge;
-  }
+  double total_cost = EvalStrategy(job_conf, strategy);
   std::cout << "Cost calculated by Random Strategy is " << total_cost << std::endl;
 }
 
