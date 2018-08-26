@@ -205,8 +205,6 @@ double SolveByTwoStepStrategy(std::vector<TaskDesc>& job_conf) {
   return total_cost;
 }
 
-// true -> on server
-// false -> on mobile
 double EvalStrategy(std::vector<TaskDesc>& job_conf) {
   std::queue<TaskDesc> edge_queue;
   double cur_cost = 0;
@@ -302,6 +300,8 @@ void CollectStatistics(bool calc_optimal_value, double transmit_speed, double ed
     task_nums = {10, 100, 500, 10000, 10000};
   }
   std::fstream ostrm(output_filename, std::ios::out);
+  ostrm << "transmit_speed: " << transmit_speed << std::endl;
+  ostrm << "edge_comp_frequency: " << edge_comp_frequency << std::endl;
   for (int task_num : task_nums) {
     ostrm << "Current task_num: " << task_num << std::endl;
     std::vector<TaskDesc> job_conf;
