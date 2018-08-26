@@ -19,6 +19,8 @@ struct TaskDesc {
   int limit;  // limit delay time of task
   bool force2server;  // if true, forced to be excuted on server
 
+  int arranged_state; // determine where this job arranged: 0->mobile, 1->edge
+
   double time_mobile;
   double time_transmit;
   double time_wait;
@@ -92,13 +94,14 @@ void WriteJobConf2File(const std::string& file_name, const std::vector<TaskDesc>
   ostrm.close();
 }
 
-void SolveByOneStepStrategy(const std::vector<TaskDesc>& job_conf) {
+double SolveByOneStepStrategy(std::vector<TaskDesc>& job_conf) {
   double edge_time = 0;
   int reject_cnt = 0;
   double cost = 0;
   for (int i = 0; i < job_conf.size(); ++i) {
-    const TaskDesc& task_desc = job_conf[i];
+    TaskDesc& task_desc = job_conf[i];
     if (task_desc.force2server) {
+      task_desc.arranged_state = 1;
       edge_time = std::max(edge_time, task_desc.gen_time + task_desc.time_transmit) + task_desc.time_edge;
       cost += edge_time - task_desc.gen_time;
       continue;
@@ -107,15 +110,13 @@ void SolveByOneStepStrategy(const std::vector<TaskDesc>& job_conf) {
       double local_cost = task_desc.time_mobile;
       double edge_cost = task_desc.time_edge + task_desc.time_transmit;
       if (task_desc.limit < local_cost && task_desc.limit < edge_cost) {
-        // in fact, this situation will not happen
-        std::cout << "reject" << std::endl;
         ++reject_cnt;
       } else if (local_cost < edge_cost) {
-        // std::cout << "mobile" << std::endl << "time is " << edge_time << std::endl;
+        task_desc.arranged_state = 0;
         cost += local_cost;
       } else {
+        task_desc.arranged_state = 1;
         edge_time = task_desc.time_transmit + task_desc.time_edge + task_desc.gen_time;
-        // std::cout << "edge" << std::endl << "time is " << edge_time << std::endl;
         cost += edge_cost;
       }
     } else {
@@ -123,21 +124,18 @@ void SolveByOneStepStrategy(const std::vector<TaskDesc>& job_conf) {
       double local_cost = task_desc.time_mobile;
       double edge_cost = task_desc.time_edge  + task_desc.time_transmit + wait_time;
       if (task_desc.limit < local_cost && task_desc.limit < edge_cost) {
-        // this situation may happen
-        std::cout << "reject" << std::endl;
         ++reject_cnt;
       } else if (local_cost < edge_cost) {
-        // std::cout << "mobile" << std::endl << "time is " << edge_time << std::endl;
+        task_desc.arranged_state = 0;
         cost += local_cost;
       } else {
+        task_desc.arranged_state = 1;
         edge_time = edge_time + task_desc.time_edge;
-        // std::cout << "edge" << std::endl << "time is " << edge_time << std::endl;
         cost += edge_cost;
       }
     }
   }
-  // std::cout << "reject: " << reject_cnt << std::endl;
-  std::cout << "Cost calculated by One Step Strategy is " << cost << std::endl;
+  return cost;
 }
 
 double CalcExpectedTimeOnEdge(double prev_gen_time, double time_transmit, double time_edge,
@@ -154,7 +152,7 @@ double CalcExpectedTimeOnEdge(double prev_gen_time, double time_transmit, double
   return expected_cost1 + expected_cost2;
 }
 
-void SolveByTwoStepStrategy(const std::vector<TaskDesc>& job_conf) {
+double SolveByTwoStepStrategy(std::vector<TaskDesc>& job_conf) {
   double lambda_1 = 1;
   double lambda_2 = 10;
   std::random_device rd;
@@ -166,7 +164,7 @@ void SolveByTwoStepStrategy(const std::vector<TaskDesc>& job_conf) {
   double prev_end_time = 0.0;
   double total_cost = 0.0;
   for (int i = 0; i < job_conf.size(); ++i) {
-    const TaskDesc& task_desc = job_conf[i];
+    TaskDesc& task_desc = job_conf[i];
     sum_delta_time += task_desc.gen_time - cur_time;
     cur_time = task_desc.gen_time;
     // update lambda by MAP
@@ -195,25 +193,27 @@ void SolveByTwoStepStrategy(const std::vector<TaskDesc>& job_conf) {
         task_desc.time_transmit, task_desc.time_edge, try_edge_start_time + task_desc.time_edge,
         lambda);
     if (std::min(t0, t1) < std::min(t2, t3) && task_desc.force2server == false) {
+      task_desc.arranged_state = 0;
       total_cost += task_desc.time_mobile;
     } else {
+      task_desc.arranged_state = 1;
       total_cost += try_edge_cost;
       prev_end_time = try_edge_start_time + task_desc.time_edge;
     }
   }
   std::cout << "Estimated lambda : " << lambda << std::endl;
-  std::cout << "Cost calculated by Two Step Strategy is " << total_cost << std::endl;
+  return total_cost;
 }
 
 // true -> on server
 // false -> on mobile
-double EvalStrategy(const std::vector<TaskDesc>& job_conf, const std::vector<bool>& strategy) {
+double EvalStrategy(std::vector<TaskDesc>& job_conf) {
   std::queue<TaskDesc> edge_queue;
   double cur_cost = 0;
   for (int i = 0; i < job_conf.size(); ++i) {
-    if (strategy[i]) {
+    if (job_conf[i].arranged_state == 1) {
       edge_queue.push(job_conf[i]);
-    } else {
+    } else if (job_conf[i].arranged_state == 0) {
       cur_cost += job_conf[i].time_mobile;
     }
   }
@@ -221,54 +221,59 @@ double EvalStrategy(const std::vector<TaskDesc>& job_conf, const std::vector<boo
   while (!edge_queue.empty()) {
     TaskDesc task = edge_queue.front();
     edge_queue.pop();
-    double wait_time = std::max(edge_time - (task.gen_time + task.time_transmit), 0.0);
-    cur_cost += wait_time + task.time_edge;
-    edge_time = task.gen_time + task.time_transmit + wait_time + task.time_edge;
+    double arrive_time = std::max(edge_time, task.gen_time + task.time_transmit);
+    cur_cost += arrive_time - task.gen_time + task.time_edge;
+    edge_time = arrive_time + task.time_edge;
   }
   return cur_cost;
 }
 
-void SolveByBruteForce(const std::vector<TaskDesc>& job_conf) {
+double SolveByBruteForce(std::vector<TaskDesc>& job_conf) {
   int task_cnt = static_cast<int>(job_conf.size());
   if (task_cnt > 30) {
     std::cout << "Brute force only for problem size <= 30" << std::endl;
-    return;
+    return -1;
   }
   double min_cost = std::numeric_limits<double>::max();
   int not_arranged_cnt = 0;
   for (int i = 0; i < task_cnt; ++i) {
     if (!job_conf[i].force2server)  { ++not_arranged_cnt; }
   }
+  std::vector<int> optimal_arrange;
   for (int i = 0; i < (1 << not_arranged_cnt); ++i) {
     int iter = 0;
-    std::vector<bool> strategy(task_cnt, false);
     for (int j = 0; j < task_cnt; ++j) {
       if (job_conf[j].force2server) {
-        strategy[j] = true;
+        job_conf[j].arranged_state = 1;
       } else {
-        if (i & (1 << iter)) { strategy[j] = true; }
+        if (i & (1 << iter))  { job_conf[j].arranged_state = 1; }
+        else  { job_conf[j].arranged_state = 0; }
         ++iter;
       }
     }
-    min_cost = std::min(min_cost, EvalStrategy(job_conf, strategy));
+    double cur_cost = EvalStrategy(job_conf);
+    if (cur_cost < min_cost) {
+      min_cost = cur_cost;
+      optimal_arrange.assign(job_conf.size(), 0);
+      for (int j = 0; j < job_conf.size(); ++j) { optimal_arrange[j] = job_conf[j].arranged_state; }
+    }
   }
-  std::cout << "Ground truth cost is " << min_cost << std::endl;
+  for (int i = 0; i < job_conf.size(); ++i) { job_conf[i].arranged_state = optimal_arrange[i]; }
+  return min_cost;
 }
 
-void SolveByRandom(const std::vector<TaskDesc>& job_conf) {
+double SolveByRandom(std::vector<TaskDesc>& job_conf) {
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_real_distribution<> dis(0.0, 1.0);
-  std::vector<bool> strategy(job_conf.size(), false);
   for (int i = 0; i < job_conf.size(); ++i) {
     if (dis(gen) < 0.5 || job_conf[i].force2server) {
-      strategy[i] = true;
+      job_conf[i].arranged_state = 1;
     } else {
-      strategy[i] = false;
+      job_conf[i].arranged_state = 0;
     }
   }
-  double total_cost = EvalStrategy(job_conf, strategy);
-  std::cout << "Cost calculated by Random Strategy is " << total_cost << std::endl;
+  return EvalStrategy(job_conf);
 }
 
 void PrintUsage() {
@@ -282,7 +287,49 @@ void PrintUsage() {
     << "-b input_filename: "
     << "solve taskconf stored in input_filename by brute force" << std::endl
     << "-r input_filename: "
-    << "solve taskconf stored in input_filename by random" << std::endl;
+    << "solve taskconf stored in input_filename by random" << std::endl
+    << "-s is_calc_optimal_value transmit_speed edge_comp_frequency output_filename:"
+    << "generate statistics for current algorithms, is_calc_optimal_value is a 0/1 integer to "
+    << "denote whether calculating optimal value" << std::endl;
+}
+
+void CollectStatistics(bool calc_optimal_value, double transmit_speed, double edge_comp_frequency,
+    std::string& output_filename) {
+  std::vector<int> task_nums;
+  if (calc_optimal_value) {
+    task_nums = {10, 20, 25};
+  } else {
+    task_nums = {10, 100, 500, 10000, 10000};
+  }
+  std::fstream ostrm(output_filename, std::ios::out);
+  for (int task_num : task_nums) {
+    ostrm << "Current task_num: " << task_num << std::endl;
+    std::vector<TaskDesc> job_conf;
+    GenJonConf(task_num, edge_comp_frequency, transmit_speed, job_conf);
+    if (calc_optimal_value) {
+      ostrm << "Job properties" << std::endl;
+      for (auto& task_desc : job_conf) {
+        ostrm << task_desc.len << " " << task_desc.load << " " << task_desc.fc << " " << task_desc.limit
+          << " " << task_desc.force2server << " " << task_desc.time_mobile << " " << task_desc.time_edge
+          << " " << task_desc.time_transmit << " " << task_desc.gen_time << std::endl;
+      }
+      ostrm << std::endl;
+    }
+    ostrm << "Answer calculated by one step strategy: " << SolveByOneStepStrategy(job_conf) << std::endl;
+    for (int i = 0; i < task_num; ++i) { ostrm << job_conf[i].arranged_state; }
+    ostrm << std::endl;
+    ostrm << "Answer calculated by two step strategy: " << SolveByTwoStepStrategy(job_conf) << std::endl;
+    for (int i = 0; i < task_num; ++i) { ostrm << job_conf[i].arranged_state; }
+    ostrm << std::endl;
+    ostrm << "Answer calculated by random: " << SolveByRandom(job_conf) << std::endl;
+    for (int i = 0; i < task_num; ++i) { ostrm << job_conf[i].arranged_state; }
+    ostrm << std::endl;
+    if (calc_optimal_value) {
+      ostrm << "Optimal answer: " << SolveByBruteForce(job_conf) << std::endl;
+      for (int i = 0; i < task_num; ++i) { ostrm << job_conf[i].arranged_state; }
+    }
+    ostrm << std::endl << std::endl;
+  }
 }
 
 int main(int argc, char* argv[]) {
@@ -299,16 +346,22 @@ int main(int argc, char* argv[]) {
     std::vector<TaskDesc> job_conf;
     ReadJobConf4File(input_filename, job_conf);
     if (std::string(argv[1]) == "-o") {
-      SolveByOneStepStrategy(job_conf);
+      std::cout << "Cost calculated by One Step Strategy is " << SolveByOneStepStrategy(job_conf) << std::endl;
     } else if (std::string(argv[1]) == "-t") {
-      SolveByTwoStepStrategy(job_conf);
+      std::cout << "Cost calculated by Two Step Strategy is " << SolveByTwoStepStrategy(job_conf) << std::endl;
     } else if (std::string(argv[1]) == "-b") {
-      SolveByBruteForce(job_conf);
+      std::cout << "Ground truth cost is " << SolveByBruteForce(job_conf) << std::endl;
     } else if (std::string(argv[1]) == "-r") {
-      SolveByRandom(job_conf);
+      std::cout << "Cost calculated by Random Strategy is " << SolveByRandom(job_conf) << std::endl;
     } else {
       PrintUsage();
     }
+  } else if (argc == 6 && std::string(argv[1]) == "-s") {
+    int calc_optimal_value = std::stoi(std::string(argv[2]));
+    double transmit_speed = std::stod(std::string(argv[3]));
+    double edge_comp_frequency = std::stod(std::string(argv[4]));
+    std::string output_filename = std::string(argv[5]);
+    CollectStatistics(calc_optimal_value, transmit_speed, edge_comp_frequency, output_filename);
   } else {
     PrintUsage();
   }
