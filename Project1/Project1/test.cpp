@@ -11,6 +11,7 @@
 
 const double exp_dist_para = 3.0;
 const double force2server_ratio = 0.2;
+const int random_run_num = 10;
 
 struct TaskDesc {
   int len; // data length of task
@@ -320,15 +321,15 @@ void CollectStatistics(bool calc_optimal_value, double transmit_speed, double ed
       }
       ostrm << std::endl;
     }
-    ostrm << "Answer calculated by one step strategy: " << SolveByOneStepStrategy(job_conf) << std::endl;
+    ostrm << "Cost calculated by one step strategy: " << SolveByOneStepStrategy(job_conf) << std::endl;
     for (int i = 0; i < task_num; ++i) { ostrm << job_conf[i].arranged_state; }
     ostrm << std::endl;
-    ostrm << "Answer calculated by two step strategy: " << SolveByTwoStepStrategy(job_conf) << std::endl;
+    ostrm << "Cost calculated by two step strategy: " << SolveByTwoStepStrategy(job_conf) << std::endl;
     for (int i = 0; i < task_num; ++i) { ostrm << job_conf[i].arranged_state; }
     ostrm << std::endl;
-    ostrm << "Answer calculated by random: " << SolveByRandom(job_conf) << std::endl;
-    for (int i = 0; i < task_num; ++i) { ostrm << job_conf[i].arranged_state; }
-    ostrm << std::endl;
+    double avg_rnd_cost = 0;
+    for (int i = 0; i < random_run_num; ++i) { avg_rnd_cost += SolveByRandom(job_conf) / random_run_num; }
+    ostrm << "Average cost calculated by random: " << avg_rnd_cost << std::endl << std::endl;;
     if (calc_optimal_value) {
       ostrm << "Optimal answer: " << SolveByBruteForce(job_conf) << std::endl;
       for (int i = 0; i < task_num; ++i) { ostrm << job_conf[i].arranged_state; }
