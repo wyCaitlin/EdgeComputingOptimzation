@@ -15,7 +15,7 @@ const double force2server_ratio = 0.2;
 struct TaskDesc {
   int len; // data length of task
   int load;  // workload of task
-  int fc;  // compute frequency of mobile
+  int fm;  // compute frequency of mobile
   int limit;  // limit delay time of task
   bool force2server;  // if true, forced to be excuted on server
 
@@ -30,15 +30,20 @@ struct TaskDesc {
 };
 
 bool GenOneTask(TaskDesc* task_desc, double edge_comp_frequency, double transmit_speed) {
-  task_desc->len = std::rand() % 20 + 1;
-  task_desc->load = std::rand() % 10 + 1;
-  task_desc->fc = std::rand() % 30 + 1;
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<> dis_len(5.0, 10.0);
+  std::uniform_real_distribution<> dis_load(0.9, 1.1);
+  std::uniform_real_distribution<> dis_fm(1.8, 2.2);
+  task_desc->len = dis_len(gen);
+  task_desc->load = dis_load(gen);
+  task_desc->fm = dis_fm(gen);
   // we set limit to inf to avoid reject situation
   task_desc->limit = std::numeric_limits<int>::max();
   // task_desc->limit = rand() % 10 + 1;
   task_desc->force2server = false;
 
-  task_desc->time_mobile = 1.0 * task_desc->len * task_desc->load / task_desc->fc;
+  task_desc->time_mobile = 1.0 * task_desc->len * task_desc->load / task_desc->fm;
   task_desc->time_edge = 1.0 * task_desc->len * task_desc->load / edge_comp_frequency;
   task_desc->time_transmit = 1.0 * task_desc->len / transmit_speed;
 
@@ -77,7 +82,7 @@ void ReadJobConf4File(const std::string& file_name, std::vector<TaskDesc>& job_c
   while (std::getline(istrm, line)) {
     std::istringstream iss(line);
     TaskDesc task_desc;
-    iss >> task_desc.len >> task_desc.load >> task_desc.fc >> task_desc.limit >> task_desc.force2server >>
+    iss >> task_desc.len >> task_desc.load >> task_desc.fm >> task_desc.limit >> task_desc.force2server >>
       task_desc.time_mobile >> task_desc.time_edge >> task_desc.time_transmit >> task_desc.gen_time;
     job_conf.push_back(task_desc);
   }
@@ -87,7 +92,7 @@ void ReadJobConf4File(const std::string& file_name, std::vector<TaskDesc>& job_c
 void WriteJobConf2File(const std::string& file_name, const std::vector<TaskDesc>& job_conf) {
   std::fstream ostrm(file_name, std::ios::out);
   for (const auto& task_desc : job_conf) {
-    ostrm << task_desc.len << " " << task_desc.load << " " << task_desc.fc << " " << task_desc.limit
+    ostrm << task_desc.len << " " << task_desc.load << " " << task_desc.fm << " " << task_desc.limit
       << " " << task_desc.force2server << " " << task_desc.time_mobile << " " << task_desc.time_edge
       << " " << task_desc.time_transmit << " " << task_desc.gen_time << std::endl;
   }
@@ -309,7 +314,7 @@ void CollectStatistics(bool calc_optimal_value, double transmit_speed, double ed
     if (calc_optimal_value) {
       ostrm << "Job properties" << std::endl;
       for (auto& task_desc : job_conf) {
-        ostrm << task_desc.len << " " << task_desc.load << " " << task_desc.fc << " " << task_desc.limit
+        ostrm << task_desc.len << " " << task_desc.load << " " << task_desc.fm << " " << task_desc.limit
           << " " << task_desc.force2server << " " << task_desc.time_mobile << " " << task_desc.time_edge
           << " " << task_desc.time_transmit << " " << task_desc.gen_time << std::endl;
       }
