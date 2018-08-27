@@ -13,6 +13,13 @@ const double exp_dist_para = 3.0;
 const double force2server_ratio = 0.2;
 const int random_run_num = 10;
 
+const double len_mean = 5.0;
+const double len_var = 10.0;
+const double load_mean = 0.9;
+const double load_var = 1.1;
+const double fm_mean = 1.8;
+const double fm_var = 1.8;
+
 struct TaskDesc {
   int len; // data length of task
   int load;  // workload of task
@@ -33,15 +40,15 @@ struct TaskDesc {
 bool GenOneTask(TaskDesc* task_desc, double edge_comp_frequency, double transmit_speed) {
   std::random_device rd;
   std::mt19937 gen(rd());
-  std::uniform_real_distribution<> dis_len(5.0, 10.0);
-  std::uniform_real_distribution<> dis_load(0.9, 1.1);
-  std::uniform_real_distribution<> dis_fm(1.8, 2.2);
+  std::uniform_real_distribution<> dis_len(len_mean, len_var);
+  std::uniform_real_distribution<> dis_load(load_mean, load_var);
+  std::uniform_real_distribution<> dis_fm(fm_mean, fm_var);
   task_desc->len = dis_len(gen);
   task_desc->load = dis_load(gen);
   task_desc->fm = dis_fm(gen);
+  if (task_desc->len <= 0 || task_desc->load <= 0 || task_desc->fm <= 0) { return false; }
   // we set limit to inf to avoid reject situation
   task_desc->limit = std::numeric_limits<int>::max();
-  // task_desc->limit = rand() % 10 + 1;
   task_desc->force2server = false;
 
   task_desc->time_mobile = 1.0 * task_desc->len * task_desc->load / task_desc->fm;
@@ -293,12 +300,46 @@ void PrintUsage() {
     << "-r input_filename: "
     << "solve taskconf stored in input_filename by random" << std::endl
     << "-s is_calc_optimal_value transmit_speed edge_comp_frequency output_filename:"
-    << "generate statistics for current algorithms, is_calc_optimal_value is a 0/1 integer to "
-    << "denote whether calculating optimal value" << std::endl;
+    << "calculate statistics for current algorithms, is_calc_optimal_value is a 0/1 integer to "
+    << "denote whether calculating optimal value" << std::endl
+    << "-r is_calc_optimal_value input_filename output_filename:"
+    << "calculate statistics for a job conf stored in input_filename, results will be in output_filename" << std::endl;
 }
 
-void CollectStatistics(bool calc_optimal_value, double transmit_speed, double edge_comp_frequency,
+void CollectStatistics4SpecificJobConf(bool calc_optimal_value, std::string& input_filename,
     std::string& output_filename) {
+  std::vector<TaskDesc> job_conf;
+  ReadJobConf4File(input_filename, job_conf);
+  int task_num = static_cast<int>(job_conf.size());
+  std::fstream ostrm(output_filename, std::ios::out);
+  if (calc_optimal_value) {
+    ostrm << "Job properties" << std::endl;
+    for (auto& task_desc : job_conf) {
+      ostrm << task_desc.len << " " << task_desc.load << " " << task_desc.fm << " " << task_desc.limit
+        << " " << task_desc.force2server << " " << task_desc.time_mobile << " " << task_desc.time_edge
+        << " " << task_desc.time_transmit << " " << task_desc.gen_time << std::endl;
+    }
+    ostrm << std::endl;
+  }
+  ostrm << "Cost calculated by one step strategy: " << SolveByOneStepStrategy(job_conf) << std::endl;
+  for (int i = 0; i < task_num; ++i) { ostrm << job_conf[i].arranged_state; }
+  ostrm << std::endl;
+  ostrm << "Cost calculated by two step strategy: " << SolveByTwoStepStrategy(job_conf) << std::endl;
+  for (int i = 0; i < task_num; ++i) { ostrm << job_conf[i].arranged_state; }
+  ostrm << std::endl;
+  double avg_rnd_cost = 0;
+  for (int i = 0; i < random_run_num; ++i) { avg_rnd_cost += SolveByRandom(job_conf) / random_run_num; }
+  ostrm << "Average cost calculated by random: " << avg_rnd_cost << std::endl << std::endl;;
+  if (calc_optimal_value) {
+    ostrm << "Optimal answer: " << SolveByBruteForce(job_conf) << std::endl;
+    for (int i = 0; i < task_num; ++i) { ostrm << job_conf[i].arranged_state; }
+  }
+  ostrm << std::endl << std::endl;
+  ostrm.close();
+}
+
+void CollectStatistics4RandomGenJobConf(bool calc_optimal_value, double transmit_speed,
+    double edge_comp_frequency, std::string& output_filename) {
   std::vector<int> task_nums;
   if (calc_optimal_value) {
     task_nums = {10, 20, 25};
@@ -336,6 +377,7 @@ void CollectStatistics(bool calc_optimal_value, double transmit_speed, double ed
     }
     ostrm << std::endl << std::endl;
   }
+  ostrm.close();
 }
 
 int main(int argc, char* argv[]) {
@@ -343,7 +385,7 @@ int main(int argc, char* argv[]) {
     int task_num = std::stoi(std::string(argv[2]));
     double transmit_speed = std::stod(std::string(argv[3]));
     double edge_comp_frequency = std::stod(std::string(argv[4]));
-    std::string output_filename = std::string(argv[5]);
+    std::string output_filename(argv[5]);
     std::vector<TaskDesc> job_conf;
     GenJonConf(task_num, edge_comp_frequency, transmit_speed, job_conf);
     WriteJobConf2File(output_filename, job_conf);
@@ -366,8 +408,13 @@ int main(int argc, char* argv[]) {
     int calc_optimal_value = std::stoi(std::string(argv[2]));
     double transmit_speed = std::stod(std::string(argv[3]));
     double edge_comp_frequency = std::stod(std::string(argv[4]));
-    std::string output_filename = std::string(argv[5]);
-    CollectStatistics(calc_optimal_value, transmit_speed, edge_comp_frequency, output_filename);
+    std::string output_filename(argv[5]);
+    CollectStatistics4RandomGenJobConf(calc_optimal_value, transmit_speed, edge_comp_frequency, output_filename);
+  } else if (argc == 5 && std::string(argv[1]) == "-r") {
+    int calc_optimal_value = std::stoi(std::string(argv[2]));
+    std::string input_filename(argv[3]);
+    std::string output_filename(argv[4]);
+    CollectStatistics4SpecificJobConf(calc_optimal_value, input_filename, output_filename);
   } else {
     PrintUsage();
   }
