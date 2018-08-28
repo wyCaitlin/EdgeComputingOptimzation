@@ -302,7 +302,7 @@ void PrintUsage() {
     << "-s is_calc_optimal_value transmit_speed edge_comp_frequency output_filename:"
     << "calculate statistics for current algorithms, is_calc_optimal_value is a 0/1 integer to "
     << "denote whether calculating optimal value" << std::endl
-    << "-r is_calc_optimal_value input_filename output_filename:"
+    << "-p is_calc_optimal_value input_filename output_filename:"
     << "calculate statistics for a job conf stored in input_filename, results will be in output_filename" << std::endl;
 }
 
@@ -410,7 +410,7 @@ int main(int argc, char* argv[]) {
     double edge_comp_frequency = std::stod(std::string(argv[4]));
     std::string output_filename(argv[5]);
     CollectStatistics4RandomGenJobConf(calc_optimal_value, transmit_speed, edge_comp_frequency, output_filename);
-  } else if (argc == 5 && std::string(argv[1]) == "-r") {
+  } else if (argc == 5 && std::string(argv[1]) == "-p") {
     int calc_optimal_value = std::stoi(std::string(argv[2]));
     std::string input_filename(argv[3]);
     std::string output_filename(argv[4]);
